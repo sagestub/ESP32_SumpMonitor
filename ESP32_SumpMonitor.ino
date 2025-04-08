@@ -13,16 +13,18 @@ void setup() {
 }
 
 void loop() {
-  digitalWrite(relayPin,0);
-  relayState = digitalRead(sensingPin);
-  Serial.print("Relay is ");
-  Serial.println(relayState);
-  delay(1000);
-  digitalWrite(relayPin,1);
-  relayState = digitalRead(sensingPin);
-  Serial.print("Relay is ");
-  Serial.println(relayState);
-  delay(1000);
-  
+  controlMotor(isSwitchOn(sensingPin),0,relayPin);
+  delay(10);
+}
 
+boolean isSwitchOn(int pin) {
+  return digitalRead(pin);
+}
+void controlMotor(bool switchState,bool hysteresisTimer,int pin) {
+  if (switchState|hysteresisTimer) {
+    digitalWrite(pin,1);
+  }
+  else {
+    digitalWrite(pin,0);
+  }
 }
