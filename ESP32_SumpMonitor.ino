@@ -9,8 +9,11 @@ const int pwmDutyCycle = 39;     //PWM duty cycle (0-255)
 const int adcPin = 36;
 const int baudRate=250000;
 boolean relayState = 0;
-long int intBuffer = 0;
+int val = 0;
+int maxVal = 0;
+unsigned int intBuffer = 0;
 float avg = 0;
+
 unsigned int count = 0;
 void setup() {
   Serial.begin(baudRate);
@@ -24,17 +27,19 @@ void setup() {
 
 void loop() {
   controlMotor(isSwitchOn(sensingPin),0,relayPin);
-//  intBuffer+=analogRead(adcPin);
-//  count++; 
-//  if(count>=50){
-//    avg = (float(intBuffer/50));
-//    intBuffer=0;
-//    count = 0;
-//  }
-//  if(count%25<3) {
-//    Serial.println(avg);
-//  }
-  Serial.println(analogRead(adcPin));
+  val=analogRead(adcPin);
+  if(val>maxVal) {
+    maxVal = val;
+  }
+  count++; 
+  if(count>50){
+    avg = float(maxVal)*3.3/4096*1.18*32; //0.707*3.3/4096*32, 0.018
+    intBuffer=0;
+    count = 0;
+    maxVal = 0;
+    Serial.println(avg);
+  }
+  //Serial.println(count);
   delay(5);
 }
 
