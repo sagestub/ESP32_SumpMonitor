@@ -1,57 +1,35 @@
-#include "HardwareSerial.h"
-#include "esp_adc/adc_continuous.h" //continuous mode adc provides faster read
+// set up ESP32 to only use single core for freeRTOS (simplifies setup)
+#if CONFIG_FREERTOS_UNICORE
+static const BaseType_t app_cpu = 0;
+#else
+static const BaseType_t app_cpu = 1;
+#endif
 
+// variables
+static const int led_pin = 3; // use GPIO3 pin for LED digital out
 
-const int relayPin = 3;
-const int sensingPin = 17;
-const int pwmPin = 25;            //GPIO pin for pwm output
-const int pwmDutyCycle = 39;     //PWM duty cycle (0-255)
-const int adcPin = 36;
-const int baudRate=250000;
-boolean relayState = 0;
-int val = 0;
-int maxVal = 0;
-unsigned int intBuffer = 0;
-float avg = 0;
-
-unsigned int count = 0;
-void setup() {
-  Serial.begin(baudRate);
-  pinMode(relayPin,OUTPUT);
-  pinMode(sensingPin,INPUT_PULLUP);
-  analogSetAttenuation(ADC_11db);
-  pinMode(adcPin,INPUT);
-//  pinMode(pwmPin,OUTPUT);
-//  analogWrite(pwmPin,pwmDutyCycle);
+void toggleLED(void *parameter) {
+  while(1) {
+    digitalWrite(led_pin,HIGH);
+    vTaskDelay(500/portTICK_PERIOD_MS);
+    digitalWrite(led_pin,LOW);
+    vTaskDelay(500/portTICK_PERIOD_MS);
+  }
 }
 
-void loop() {
-  controlMotor(isSwitchOn(sensingPin),0,relayPin);
-  val=analogRead(adcPin);
-  if(val>maxVal) {
-    maxVal = val;
-  }
-  count++; 
-  if(count>50){
-    avg = float(maxVal)*3.3/4096*1.18*32; //0.707*3.3/4096*32, 0.018
-    intBuffer=0;
-    count = 0;
-    maxVal = 0;
-    Serial.println(avg);
-  }
-  //Serial.println(count);
-  delay(5);
+void setup () {
+  pinMode(led_pin, OUTPUT);
+  xTaskCreatePinnedToCore(  //use xTaskCreate() in Vanilla RTOS
+              toggleLED,    //Function to be called
+              "Toggle LED", //Name of taask
+              1024,         //Stack size (bytes in ESP32 words in RTOS)
+              NULL,         //Parameter to poass to function
+              1,            //Task priority (0 to configMAX_PRIORITIES-1)
+              NULL,         // Task handle
+              app_cpu);    //run on one core for demo purposes (ESP32 only)
+              // in vanilla RTOS, would also require vTaskStartScheduler() in main after setting up tasks
 }
 
-
-boolean isSwitchOn(int pin) {
-  return digitalRead(pin);
-}
-void controlMotor(bool switchState,bool hysteresisTimer,int pin) {
-  if (switchState|hysteresisTimer) {
-    digitalWrite(pin,1);
-  }
-  else {
-    digitalWrite(pin,0);
-  }
+void loop () {
+  //nothing needs to go here
 }
