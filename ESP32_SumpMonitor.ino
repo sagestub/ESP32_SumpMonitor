@@ -59,7 +59,7 @@ String readFullStringBlocking() {
   String inputString = "";
   bool stringComplete = false;
 
-  Serial.println("Enter a text string and press Enter:");
+//  Serial.println("Enter a text string and press Enter:");
 
   while (!stringComplete) {
     if (Serial.available() > 0) {
@@ -88,15 +88,9 @@ void setup(void) {
     Serial.print("Enter password to connect to network ");
     Serial.println(WIFI_SSID);
     while (!inputReceived) {
-      //if (Serial.available() > 0) {
-        Serial.println("reading inputs");
         WIFI_PASSWORD = readFullStringBlocking();
-        Serial.print("recieved: ");
-        Serial.println(WIFI_PASSWORD);
-        Serial.println("done reading inputs");
         inputReceived = true;
         WIFI_PASSWORD.trim(); // Remove any trailing newline or carriage return
-        //}
     }
     Serial.print("Connecting to WiFi ");
     Serial.println(WIFI_SSID);
