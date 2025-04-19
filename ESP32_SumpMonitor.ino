@@ -1,35 +1,149 @@
-// set up ESP32 to only use single core for freeRTOS (simplifies setup)
-#if CONFIG_FREERTOS_UNICORE
-static const BaseType_t app_cpu = 0;
-#else
-static const BaseType_t app_cpu = 1;
-#endif
+#include <WiFi.h>
+#include <WiFiClient.h>
+#include <WebServer.h>
+#include <uri/UriBraces.h>
 
-// variables
-static const int led_pin = 3; // use GPIO3 pin for LED digital out
+#define WIFI_SSID "NETGEAR27"
+// Defining the WiFi channel speeds up the connection:
+#define WIFI_CHANNEL 6
 
-void toggleLED(void *parameter) {
-  while(1) {
-    digitalWrite(led_pin,HIGH);
-    vTaskDelay(500/portTICK_PERIOD_MS);
-    digitalWrite(led_pin,LOW);
-    vTaskDelay(500/portTICK_PERIOD_MS);
+WebServer server(80);
+
+const int LED1 = 2;
+const int LED2 = 3;
+
+String WIFI_PASSWORD = "";
+int wifiTimeout = 0;
+
+bool led1State = false;
+bool led2State = false;
+bool inputReceived = false;
+
+void sendHtml() {
+  String response = R"(
+    <!DOCTYPE html><html>
+      <head>
+        <title>ESP32 Web Server Demo</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+          html { font-family: sans-serif; text-align: center; }
+          body { display: inline-flex; flex-direction: column; }
+          h1 { margin-bottom: 1.2em; } 
+          h2 { margin: 0; }
+          div { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: auto auto; grid-auto-flow: column; grid-gap: 1em; }
+          .btn { background-color: #5B5; border: none; color: #fff; padding: 0.5em 1em;
+                 font-size: 2em; text-decoration: none }
+          .btn.OFF { background-color: #333; }
+        </style>
+      </head>
+            
+      <body>
+        <h1>ESP32 Web Server</h1>
+
+        <div>
+          <h2>LED 1</h2>
+          <a href="/toggle/1" class="btn LED1_TEXT">LED1_TEXT</a>
+          <h2>LED 2</h2>
+          <a href="/toggle/2" class="btn LED2_TEXT">LED2_TEXT</a>
+        </div>
+      </body>
+    </html>
+  )";
+  response.replace("LED1_TEXT", led1State ? "ON" : "OFF");
+  response.replace("LED2_TEXT", led2State ? "ON" : "OFF");
+  server.send(200, "text/html", response);
+}
+
+String readFullStringBlocking() {
+  String inputString = "";
+  bool stringComplete = false;
+
+  Serial.println("Enter a text string and press Enter:");
+
+  while (!stringComplete) {
+    if (Serial.available() > 0) {
+      char inChar = (char)Serial.read();
+      if (inChar == '\n') {
+        stringComplete = true;
+        inputString.trim(); // Remove any trailing newline or carriage return
+      } else if (inChar != '\r') { // Ignore carriage return
+        inputString += inChar;
+      }
+    }
+    // Optionally add a small delay to prevent busy-waiting
+    delay(10);
   }
+  return inputString;
 }
 
-void setup () {
-  pinMode(led_pin, OUTPUT);
-  xTaskCreatePinnedToCore(  //use xTaskCreate() in Vanilla RTOS
-              toggleLED,    //Function to be called
-              "Toggle LED", //Name of taask
-              1024,         //Stack size (bytes in ESP32 words in RTOS)
-              NULL,         //Parameter to poass to function
-              1,            //Task priority (0 to configMAX_PRIORITIES-1)
-              NULL,         // Task handle
-              app_cpu);    //run on one core for demo purposes (ESP32 only)
-              // in vanilla RTOS, would also require vTaskStartScheduler() in main after setting up tasks
+
+
+void setup(void) {
+  Serial.begin(115200);
+  Serial.setTimeout(1000);
+  pinMode(LED1, OUTPUT);
+  pinMode(LED2, OUTPUT);
+  
+  while (WiFi.status() != WL_CONNECTED) {
+  Serial.print("Enter password to connect to network ");
+  Serial.print(WIFI_SSID);
+    while (!inputReceived) {
+      //if (Serial.available() > 0) {
+        Serial.println("reading inputs");
+        WIFI_PASSWORD = readFullStringBlocking();
+        Serial.print("recieved: ");
+        Serial.print(WIFI_PASSWORD);
+        Serial.println("done reading inputs");
+        inputReceived = true;
+        WIFI_PASSWORD.trim(); // Remove any trailing newline or carriage return
+        //}
+  
+        delay(2000);
+    }
+    Serial.println("exiting while loop");
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD, WIFI_CHANNEL);
+    Serial.print("Connecting to WiFi ");
+    Serial.print(WIFI_SSID);
+    // Wait for connection
+    while (WiFi.status()!= WL_CONNECTED & wifiTimeout <10) {
+      delay(1000);
+      wifiTimeout += 1;
+      Serial.print(".");
+    }
+    
+    
+  }
+  Serial.println(" Connected!");
+
+  Serial.print("IP address: ");
+  Serial.println(WiFi.localIP());
+
+  server.on("/", sendHtml);
+
+  server.on(UriBraces("/toggle/{}"), []() {
+    String led = server.pathArg(0);
+    Serial.print("Toggle LED #");
+    Serial.println(led);
+
+    switch (led.toInt()) {
+      case 1:
+        led1State = !led1State;
+        digitalWrite(LED1, led1State);
+        break;
+      case 2:
+        led2State = !led2State;
+        digitalWrite(LED2, led2State);
+        break;
+    }
+
+    sendHtml();
+  });
+
+  server.begin();
+  Serial.println("HTTP server started");
 }
 
-void loop () {
-  //nothing needs to go here
+void loop(void) {
+  server.handleClient();
+  delay(2);
 }
