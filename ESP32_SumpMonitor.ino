@@ -6,6 +6,7 @@
 #define WIFI_SSID "NETGEAR27"
 // Defining the WiFi channel speeds up the connection:
 #define WIFI_CHANNEL 6
+#define WL_MAX_ATTEMPT_CONNECTION 10
 
 WebServer server(80);
 
@@ -46,7 +47,7 @@ void sendHtml() {
           <h2>LED 2</h2>
           <a href="/toggle/2" class="btn LED2_TEXT">LED2_TEXT</a>
         </div>
-      </body>
+      </body>git st
     </html>
   )";
   response.replace("LED1_TEXT", led1State ? "ON" : "OFF");
@@ -80,38 +81,33 @@ String readFullStringBlocking() {
 
 void setup(void) {
   Serial.begin(115200);
-  Serial.setTimeout(1000);
-  pinMode(LED1, OUTPUT);
-  pinMode(LED2, OUTPUT);
-  
+  esp_log_level_set("wifi", ESP_LOG_NONE); //set logging to none to avoid unneccessary print statements
   while (WiFi.status() != WL_CONNECTED) {
-  Serial.print("Enter password to connect to network ");
-  Serial.print(WIFI_SSID);
+    inputReceived = 0;
+    wifiTimeout = 0;
+    Serial.print("Enter password to connect to network ");
+    Serial.println(WIFI_SSID);
     while (!inputReceived) {
       //if (Serial.available() > 0) {
         Serial.println("reading inputs");
         WIFI_PASSWORD = readFullStringBlocking();
         Serial.print("recieved: ");
-        Serial.print(WIFI_PASSWORD);
+        Serial.println(WIFI_PASSWORD);
         Serial.println("done reading inputs");
         inputReceived = true;
         WIFI_PASSWORD.trim(); // Remove any trailing newline or carriage return
         //}
-  
-        delay(2000);
     }
-    Serial.println("exiting while loop");
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD, WIFI_CHANNEL);
     Serial.print("Connecting to WiFi ");
-    Serial.print(WIFI_SSID);
+    Serial.println(WIFI_SSID);
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD, WIFI_CHANNEL);
     // Wait for connection
-    while (WiFi.status()!= WL_CONNECTED & wifiTimeout <10) {
+    while (WiFi.status()!= WL_CONNECTED & wifiTimeout<10 ) {
       delay(1000);
-      wifiTimeout += 1;
       Serial.print(".");
+      wifiTimeout +=1;
     }
-    
-    
+    Serial.println("");
   }
   Serial.println(" Connected!");
 
@@ -141,6 +137,9 @@ void setup(void) {
 
   server.begin();
   Serial.println("HTTP server started");
+
+  pinMode(LED1, OUTPUT);
+  pinMode(LED2, OUTPUT);
 }
 
 void loop(void) {
