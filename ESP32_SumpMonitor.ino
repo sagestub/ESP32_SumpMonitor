@@ -1,17 +1,15 @@
 #include <WiFi.h>
 #include <WiFiClient.h>
-#include <WebServer.h>
 #include <ESPAsyncWebServer.h>
-#include <uri/UriBraces.h>
 
 #define WIFI_SSID "NETGEAR27"
 // Defining the WiFi channel speeds up the connection:
 #define WIFI_CHANNEL 6
 #define WL_MAX_ATTEMPT_CONNECTION 10
-#define PUMP_ON 0
-#define PUMP_OFF 1
+#define PUMP_ON 0   // energized relay turns pump on 
+#define PUMP_OFF 1  // de-energized relay will turn pump off (default)
 
-WebServer server(80);
+AsyncWebServer server(80);
 
 const int SWITCH = 17;
 const int RELAY = 19;
@@ -23,7 +21,7 @@ bool SWITCHState = false;
 bool RELAYState = PUMP_OFF;
 bool inputReceived = false;
 
-void sendHtml() {
+void getHtml() {
   String response = R"(
     <!DOCTYPE html><html>
       <head>
@@ -118,25 +116,21 @@ void setup(void) {
   
   beginWifi();
 
-  server.on("/", sendHtml);
+  server.on("/", [](AsyncWebServerRequest *request){
+    request->send(200, "text/html", getHtml());
+   });
+ 
+  server.on("/toggle/2", [](AsyncWebServerRequest *request){
+    SWITCHState = digitalRead(SWITCH);
+    request->send(200, "text/html", getHtml());
+   });
 
-  server.on(UriBraces("/toggle/{}"), []() { //when buttons are toggled execute functions in brackets (changes toggle/<value>)
-    String led = server.pathArg(0);         //<value> is stored to int
-
-    switch (led.toInt()) {
-      case 1:
-        SWITCHState = !SWITCHState;
-        digitalWrite(SWITCH, SWITCHState);
-        break;
-      case 2:
-        RELAYState = !RELAYState;
-        digitalWrite(RELAY, RELAYState);
-        break;
-    }
-
-    sendHtml();
+  server.on("/toggle/1", [](AsyncWebServerRequest *request) {
+    RELAYState = !RELAYState;
+    digitalWrite(RELAY,RELAYState);
+    request->send(200, "text/html", getHtml());
   });
-
+ 
   server.begin();
   Serial.println("HTTP server started");
 
@@ -145,6 +139,5 @@ void setup(void) {
 }
 
 void loop(void) {
-  server.handleClient();
   delay(2);
 }
