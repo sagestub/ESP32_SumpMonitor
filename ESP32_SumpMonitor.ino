@@ -1,23 +1,26 @@
 #include <WiFi.h>
 #include <WiFiClient.h>
 #include <WebServer.h>
+#include <ESPAsyncWebServer.h>
 #include <uri/UriBraces.h>
 
 #define WIFI_SSID "NETGEAR27"
 // Defining the WiFi channel speeds up the connection:
 #define WIFI_CHANNEL 6
 #define WL_MAX_ATTEMPT_CONNECTION 10
+#define PUMP_ON 0
+#define PUMP_OFF 1
 
 WebServer server(80);
 
 const int SWITCH = 17;
-const int RELAY = 3;
+const int RELAY = 19;
 
 String WIFI_PASSWORD = "";
 int wifiTimeout = 0;
 
 bool SWITCHState = false;
-bool RELAYState = false;
+bool RELAYState = PUMP_OFF;
 bool inputReceived = false;
 
 void sendHtml() {
@@ -51,9 +54,11 @@ void sendHtml() {
     </html>
   )";
   response.replace("SWITCH_TEXT", SWITCHState ? "ON" : "OFF");
-  response.replace("RELAY_TEXT", RELAYState ? "ON" : "OFF");
+  response.replace("RELAY_TEXT", RELAYState ? "OFF" : "ON");
   server.send(200, "text/html", response);
 }
+
+
 
 String readFullStringBlocking() {
   String inputString = "";
@@ -117,8 +122,6 @@ void setup(void) {
 
   server.on(UriBraces("/toggle/{}"), []() { //when buttons are toggled execute functions in brackets (changes toggle/<value>)
     String led = server.pathArg(0);         //<value> is stored to int
-    Serial.print("Toggle LED #");
-    Serial.println(led);
 
     switch (led.toInt()) {
       case 1:
@@ -137,7 +140,7 @@ void setup(void) {
   server.begin();
   Serial.println("HTTP server started");
 
-  pinMode(SWITCH, OUTPUT);
+  pinMode(SWITCH, INPUT_PULLDOWN);
   pinMode(RELAY, OUTPUT);
 }
 
