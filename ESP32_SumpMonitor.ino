@@ -28,7 +28,8 @@ String WIFI_PASSWORD = "";
 int wifiTimeout = 0;
 
 volatile bool SWITCHState = false;
-bool RELAYState = PUMP_OFF;
+bool PUMPState = PUMP_OFF;
+bool OVERRIDEState = PUMP_OFF;
 bool inputReceived = false;
 bool pumpHysteretic = 0; 
 
@@ -53,11 +54,12 @@ void handleSwitchTask (void *pvParameters) {
      portENTER_CRITICAL(&switchMux);
      SWITCHState = currentState; // Update SWITCHState based on debounced input
      portEXIT_CRITICAL(&switchMux);
+     events.send(currentState ? "OFF" : "ON", "switchStatus"); // send switch status
 
      if (!currentState) {                   // if switch on but pump not on
        digitalWrite(RELAY, PUMP_ON);        // turn pump on
-       pumpHysteretic = 1;                      // update pump status
-       events.send("ON","switchStatus");   // send SSE event for switch ON
+       pumpHysteretic = 1;                  // update pump status
+       PUMPState = PUMP_ON;             
        events.send("ON","pumpStatus");      // send SSE event for pump ON
      } else if (currentState) {             // if switch off
       pumpStartTime = millis();             // start pump timer 
@@ -68,6 +70,7 @@ void handleSwitchTask (void *pvParameters) {
    // Check if pump-on duration has elapsed
    if (currentState && pumpHysteretic && (millis() - pumpStartTime >= 5000)) {
      digitalWrite(RELAY, PUMP_OFF);
+     PUMPState = PUMP_OFF;
      pumpHysteretic = 0;
      events.send("OFF", "pumpStatus");
    }
@@ -122,8 +125,13 @@ String getHtml() {
          <h2>Switch Status</h2>
          <span id="switchStatus" class="status-box SWITCH_CLASS">SWITCH_TEXT</span>
          <h2>Pump Motor</h2>
-         <a href="/toggle/2" class="btn RELAY_TEXT">RELAY_TEXT</a>
+         <span id="pumpStatus" class="status-box RELAY_CLASS">RELAY_TEXT</span>
        </div>
+
+       <div>
+        <h2>Manual Override</h2>
+        <a href="/toggle/2" class="btn OVERRIDE_TEXT">OVERRIDE_TEXT</a>
+      </div>
 
        <script>
          if (!!window.EventSource) {
@@ -136,9 +144,9 @@ String getHtml() {
            }, false);
 
            source.addEventListener('pumpStatus', function(e) {
-             var relayButton = document.querySelector('.relayButton');
-             relayButton.innerText = 'Pump Motor: ' + (e.data === 'ON' ? 'ON' : 'OFF');
-             relayButton.className = 'btn ' + (e.data === 'ON' ? '' : 'OFF');
+             var pumpStatusElement = document.getElementById('pumpStatus');
+             switchStatusElement.innerText = e.data === 'ON' ? 'ON' : 'OFF';
+             switchStatusElement.className = 'status-box' + (e.data === 'ON' ? 'status-on' : 'status-off');
            }, false);
 
            source.addEventListener('error', function(event) {
@@ -157,8 +165,12 @@ String getHtml() {
    </html>
   )";
   response.replace("SWITCH_TEXT", SWITCHState ? "ON" : "OFF");
-  response.replace("RELAY_TEXT", RELAYState ? "OFF" : "ON");
   response.replace("SWITCH_CLASS", SWITCHState ? "status-on" : "status-off");
+
+  response.replace("RELAY_TEXT", PUMPState ? "OFF" : "ON");
+  response.replace("RELAY_CLASS", PUMPState ? "status-off" : "status-on");
+
+  response.replace("OVERRIDE_TEXT",OVERRIDEState ? "OFF" : "ON");
   return response;
 }
 
@@ -252,8 +264,8 @@ void setup(void) {
    });
 
   server.on("/toggle/2", [](AsyncWebServerRequest *request) {
-    RELAYState = !RELAYState;
-    digitalWrite(RELAY,RELAYState);
+    OVERRIDEState = !OVERRIDEState;
+    digitalWrite(RELAY,OVERRIDEState);
     request->send(200, "text/html", getHtml());
   });
 
