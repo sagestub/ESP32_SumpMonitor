@@ -8,7 +8,8 @@ static const BaseType_t app_cpu = 1;
 #include <WiFi.h>
 #include <WiFiClient.h>
 #include <ESPAsyncWebServer.h>
- #include <AsyncEventSource.h>
+#include <AsyncEventSource.h>
+#include "esp_adc/adc_continuous.h" //continuous mode adc provides faster read
 
 #define WIFI_SSID "NETGEAR27"
 // Defining the WiFi channel speeds up the connection:
@@ -23,6 +24,7 @@ AsyncEventSource events("/events");
 const int SWITCH = 17;
 const int RELAY = 19;
 const int LED = 2;
+const int ADC = 36;
 
 String WIFI_PASSWORD = "";
 int wifiTimeout = 0;
@@ -32,6 +34,9 @@ bool PUMPState = PUMP_OFF;
 bool OVERRIDEState = PUMP_OFF;
 bool inputReceived = false;
 bool pumpHysteretic = 0; 
+long int intBuffer = 0;
+float avg = 0;
+unsigned int count = 0;
 
 portMUX_TYPE switchMux = portMUX_INITIALIZER_UNLOCKED;
 
@@ -42,33 +47,34 @@ void IRAM_ATTR switchISR() {
 }
 
 void handleSwitchTask (void *pvParameters) {
-  bool lastDebouncedState = digitalRead(SWITCH);
+  bool lastDebouncedSWITCHState = digitalRead(SWITCH);
   unsigned long pumpStartTime = 0;
 
   while (1) {
-   vTaskDelay(pdMS_TO_TICKS(100));
-   bool currentState = digitalRead(SWITCH);
+   vTaskDelay(pdMS_TO_TICKS(50));
+   bool currentSWITCHState = digitalRead(SWITCH);
 
-   if (currentState != lastDebouncedState) {
-     lastDebouncedState = currentState;
+   if (currentSWITCHState != lastDebouncedSWITCHState) {
+     lastDebouncedSWITCHState = currentSWITCHState;
      portENTER_CRITICAL(&switchMux);
-     SWITCHState = currentState; // Update SWITCHState based on debounced input
+     SWITCHState = currentSWITCHState; // Update SWITCHState based on debounced input
      portEXIT_CRITICAL(&switchMux);
-     events.send(currentState ? "OFF" : "ON", "switchStatus"); // send switch status
+    //  events.send(currentSWITCHState ? "OFF" : "ON", "switchStatus"); // send switch status
 
-     if (!currentState) {                   // if switch on but pump not on
-       digitalWrite(RELAY, PUMP_ON);        // turn pump on
-       pumpHysteretic = 1;                  // update pump status
+     if (!currentSWITCHState) {                   // if switch on but pump not on
+       digitalWrite(RELAY, PUMP_ON);              // turn pump on
+       pumpHysteretic = 1;                        // update pump status
        PUMPState = PUMP_ON;             
-       events.send("ON","pumpStatus");      // send SSE event for pump ON
-     } else if (currentState) {             // if switch off
-      pumpStartTime = millis();             // start pump timer 
-      events.send("OFF", "switchStatus");   // send SSE event for switch OFF
+       events.send("ON","pumpStatus");            // send SSE event for pump ON
+       events.send("ON","switchStatus");
+     } else if (currentSWITCHState) {             // if switch off
+      pumpStartTime = millis();                   // start pump timer 
+      events.send("OFF", "switchStatus");         // send SSE event for switch OFF
      }
    }
 
    // Check if pump-on duration has elapsed
-   if (currentState && pumpHysteretic && (millis() - pumpStartTime >= 5000)) {
+   if (currentSWITCHState && pumpHysteretic && (millis() - pumpStartTime >= 5000)) {
      digitalWrite(RELAY, PUMP_OFF);
      PUMPState = PUMP_OFF;
      pumpHysteretic = 0;
@@ -83,6 +89,29 @@ void toggleLED(void *parameter) {
     vTaskDelay(500/portTICK_PERIOD_MS);
     digitalWrite(LED,LOW);
     vTaskDelay(500/portTICK_PERIOD_MS);
+  }
+}
+
+void readADC(void *parameter) {
+   while (1) {
+    intBuffer+=analogRead(adcPin);
+    count++; 
+    if(count>=50){
+      avg = (float(intBuffer/50));
+      intBuffer=0;                    //reset counters and buffer
+      count = 0;
+    }
+    if(count%25<3) {
+      Serial.println(avg);
+      char adcValueStr[20];
+      sprintf(adcValueStr, "%.2f", voltage); // Format the float to a string
+      events.send(adcValueStr, "adcReading");
+    }
+    vTaskDelay(5/portTICK_PERIOD_MS);
+
+    int adcRawValue = analogRead(ADC_PIN); // Replace ADC_PIN with your actual pin
+    float voltage = adcRawValue * (3.3 / 4095.0) * 1000.0; // Example conversion to mV
+    
   }
 }
 
@@ -119,23 +148,34 @@ String getHtml() {
      </head>
 
      <body>
-       <h1>ESP32 Web Server</h1>
+       <h1>Sump Monitor Dashboard</h1>
 
        <div>
          <h2>Switch Status</h2>
-         <span id="switchStatus" class="status-box SWITCH_CLASS">SWITCH_TEXT</span>
+         <span id="switchStatus" class="status-box status-off">OFF</span>
          <h2>Pump Motor</h2>
          <span id="pumpStatus" class="status-box RELAY_CLASS">RELAY_TEXT</span>
        </div>
 
-       <div>
-        <h2>Manual Override</h2>
-        <a href="/toggle/2" class="btn OVERRIDE_TEXT">OVERRIDE_TEXT</a>
+       <div style="height:100px;display:inline-block;place-items:center">
+        <h2 style="display:block">Manual Override</h2>
+        <a href="/toggle/2" class="btn OVERRIDE_TEXT" style="display:block;width:100px;height:50px;margin: 0 auto">OVERRIDE_TEXT</a>
+      </div>
+
+      <div>
+        <h2>Motor Current Draw</h2>
+        <span id="adcValue">0</span>
+        <span id="adcUnit"> (mV)</span> 
       </div>
 
        <script>
          if (!!window.EventSource) {
            var source = new EventSource('/events');
+
+           source.addEventListener('adcReading', function(e) {
+            var adcValueElement = document.getElementById('adcValue');
+            adcValueElement.innerText = e.data; // Update the span with the received ADC value
+          }, false);
 
            source.addEventListener('switchStatus', function(e) {
              var switchStatusElement = document.getElementById('switchStatus');
@@ -145,8 +185,8 @@ String getHtml() {
 
            source.addEventListener('pumpStatus', function(e) {
              var pumpStatusElement = document.getElementById('pumpStatus');
-             switchStatusElement.innerText = e.data === 'ON' ? 'ON' : 'OFF';
-             switchStatusElement.className = 'status-box' + (e.data === 'ON' ? 'status-on' : 'status-off');
+             pumpStatusElement.innerText = e.data === 'ON' ? 'ON' : 'OFF';
+             pumpStatusElement.className = 'status-box ' + (e.data === 'ON' ? 'status-on' : 'status-off');
            }, false);
 
            source.addEventListener('error', function(event) {
@@ -164,8 +204,8 @@ String getHtml() {
      </body>
    </html>
   )";
-  response.replace("SWITCH_TEXT", SWITCHState ? "ON" : "OFF");
-  response.replace("SWITCH_CLASS", SWITCHState ? "status-on" : "status-off");
+  // response.replace("SWITCH_TEXT", SWITCHState ? "ON" : "OFF");
+  // response.replace("SWITCH_CLASS", SWITCHState ? "status-on" : "status-off");
 
   response.replace("RELAY_TEXT", PUMPState ? "OFF" : "ON");
   response.replace("RELAY_CLASS", PUMPState ? "status-off" : "status-on");
@@ -234,7 +274,9 @@ void setup(void) {
   pinMode(SWITCH, INPUT_PULLUP);
   pinMode(RELAY, OUTPUT);
   pinMode(LED,OUTPUT);
+  pinMode(ADC,INPUT);
   digitalWrite(RELAY, PUMP_OFF);
+  analogSetAttenuation(ADC_11db);
 
   beginWifi();
 
@@ -257,6 +299,15 @@ void setup(void) {
       NULL,               /* Task handle */
       app_cpu);           /* Core to run on */
 
+    xTaskCreatePinnedToCore(
+      readADC,   /* Task function */
+      "Read ADC",     /* Name of task */
+      2048,               /* Stack size (adjust as needed) */
+      NULL,               /* Parameter passed to task */
+      3,                  /* Task priority (adjust as needed) */
+      NULL,               /* Task handle */
+      app_cpu);           /* Core to run on */
+
     attachInterrupt(digitalPinToInterrupt(SWITCH), switchISR, CHANGE);
 
   server.on("/", [](AsyncWebServerRequest *request){
@@ -266,6 +317,7 @@ void setup(void) {
   server.on("/toggle/2", [](AsyncWebServerRequest *request) {
     OVERRIDEState = !OVERRIDEState;
     digitalWrite(RELAY,OVERRIDEState);
+    PUMPState = OVERRIDEState;
     request->send(200, "text/html", getHtml());
   });
 
