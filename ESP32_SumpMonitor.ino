@@ -112,7 +112,9 @@ void readADC(void *parameter) {
       maxVal = 0;
       char adcValueStr[20];
       sprintf(adcValueStr, "%.2f", avg); // Format the float to a string
-      events.send(adcValueStr, "adcReading");
+      events.send(adcValueStr, "adcValue");
+      Serial.print(val);
+      Serial.println(adcValueStr);
     }
     vTaskDelay(5/portTICK_PERIOD_MS);    
   }
@@ -173,7 +175,7 @@ String getHtml() {
 
       <div style="display:inline">
         <h3>Motor Event Count</h3>
-        <span id="eventCount">0</span>
+        <span id="eventCount">EVENT_COUNT</span>
         <span id="eventUnit"> (events)</span> 
       </div>
 
@@ -181,14 +183,14 @@ String getHtml() {
          if (!!window.EventSource) {
            var source = new EventSource('/events');
 
-           source.addEventListener('adcReading', function(e) {
+           source.addEventListener('adcValue', function(e) {
             var adcValueElement = document.getElementById('adcValue');
             adcValueElement.innerText = e.data; // Update the span with the received ADC value
           }, false);
 
           source.addEventListener('eventCount', function(e) {
             var eventCountElement = document.getElementById('eventCount');
-            adcValueElement.innerText = e.data; // Update the span with the received value
+            eventCountElement.innerText = e.data; // Update the span with the received value
           }, false);
 
            source.addEventListener('switchStatus', function(e) {
@@ -225,7 +227,7 @@ String getHtml() {
   response.replace("RELAY_CLASS", PUMPState ? "status-off" : "status-on");
 
   response.replace("OVERRIDE_TEXT",OVERRIDEState ? "OFF" : "ON");
-  // response.replace("EVENT_COUNT",String(eventCounter));
+  response.replace("EVENT_COUNT",String(eventCounter));
   return response;
 }
 
@@ -335,7 +337,6 @@ void setup(void) {
     PUMPState = OVERRIDEState;
     if (PUMPState==PUMP_OFF) {
       eventCounter +=1;
-      events.send(String(eventCounter),"eventCount");
     }
     request->send(200, "text/html", getHtml());
   });
