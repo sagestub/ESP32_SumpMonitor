@@ -8,6 +8,7 @@ static const BaseType_t app_cpu = 1;
 #include <WiFi.h>
 #include <WiFiClient.h>
 #include <ESPAsyncWebServer.h>
+ #include <AsyncEventSource.h>
 
 #define WIFI_SSID "NETGEAR27"
 // Defining the WiFi channel speeds up the connection:
@@ -17,6 +18,7 @@ static const BaseType_t app_cpu = 1;
 #define PUMP_OFF 1  // de-energized relay will turn pump off (default)
 
 AsyncWebServer server(80);
+AsyncEventSource events("/events");
 
 const int SWITCH = 17;
 const int RELAY = 19;
@@ -28,7 +30,7 @@ int wifiTimeout = 0;
 volatile bool SWITCHState = false;
 bool RELAYState = PUMP_OFF;
 bool inputReceived = false;
-int pumpHysteretic = 0; //seconds to keep pump on after switch disengages
+bool pumpHysteretic = 0; 
 
 portMUX_TYPE switchMux = portMUX_INITIALIZER_UNLOCKED;
 
@@ -39,29 +41,35 @@ void IRAM_ATTR switchISR() {
 }
 
 void handleSwitchTask (void *pvParameters) {
-  bool lastDebouncedState = digitalRead(SWITCH); // Initial debounced state
+  bool lastDebouncedState = digitalRead(SWITCH);
+  unsigned long pumpStartTime = 0;
 
   while (1) {
-   // Simple debouncing (adjust delay as needed)
-   vTaskDelay(pdMS_TO_TICKS(50));
+   vTaskDelay(pdMS_TO_TICKS(100));
    bool currentState = digitalRead(SWITCH);
 
    if (currentState != lastDebouncedState) {
      lastDebouncedState = currentState;
-
-     // Now that we have a stable state change, react to it
      portENTER_CRITICAL(&switchMux);
-     bool currentSWITCHState = SWITCHState; // Get the toggled state
+     SWITCHState = currentState; // Update SWITCHState based on debounced input
      portEXIT_CRITICAL(&switchMux);
 
-     if (currentSWITCHState) { // Assuming HIGH (true) means ON
-      digitalWrite(RELAY, PUMP_ON);
-     } 
-     else {
-      // Start a timer or use vTaskDelay for the pump-on duration
-      vTaskDelay(pdMS_TO_TICKS(5000)); // Example 5-second pump on
-      digitalWrite(RELAY, PUMP_OFF);
+     if (!currentState) {                   // if switch on but pump not on
+       digitalWrite(RELAY, PUMP_ON);        // turn pump on
+       pumpHysteretic = 1;                      // update pump status
+       events.send("ON","switchStatus");   // send SSE event for switch ON
+       events.send("ON","pumpStatus");      // send SSE event for pump ON
+     } else if (currentState) {             // if switch off
+      pumpStartTime = millis();             // start pump timer 
+      events.send("OFF", "switchStatus");   // send SSE event for switch OFF
      }
+   }
+
+   // Check if pump-on duration has elapsed
+   if (currentState && pumpHysteretic && (millis() - pumpStartTime >= 5000)) {
+     digitalWrite(RELAY, PUMP_OFF);
+     pumpHysteretic = 0;
+     events.send("OFF", "pumpStatus");
    }
   }
  }
@@ -100,6 +108,10 @@ String getHtml() {
            background-color: #333;
            color: #fff;
          }
+         .btn { background-color: #5B5; border: none; color: #fff; padding: 0.5em 1em;
+          font-size: 2em; text-decoration: none; 
+        } 
+         .btn.OFF { background-color: #333; }
        </style>
      </head>
 
@@ -112,6 +124,35 @@ String getHtml() {
          <h2>Pump Motor</h2>
          <a href="/toggle/2" class="btn RELAY_TEXT">RELAY_TEXT</a>
        </div>
+
+       <script>
+         if (!!window.EventSource) {
+           var source = new EventSource('/events');
+
+           source.addEventListener('switchStatus', function(e) {
+             var switchStatusElement = document.getElementById('switchStatus');
+             switchStatusElement.innerText = e.data === 'ON' ? 'ON' : 'OFF';
+             switchStatusElement.className = 'status-box ' + (e.data === 'ON' ? 'status-on' : 'status-off');
+           }, false);
+
+           source.addEventListener('pumpStatus', function(e) {
+             var relayButton = document.querySelector('.relayButton');
+             relayButton.innerText = 'Pump Motor: ' + (e.data === 'ON' ? 'ON' : 'OFF');
+             relayButton.className = 'btn ' + (e.data === 'ON' ? '' : 'OFF');
+           }, false);
+
+           source.addEventListener('error', function(event) {
+             if (event.target.readyState === EventSource.CLOSED) {
+               console.log('EventSource disconnected');
+             } else if (event.target.readyState === EventSource.CONNECTING) {
+               console.log('EventSource connecting...');
+             }
+           }, false);
+         } else {
+           console.log("Your browser doesn't support SSE");
+         }
+       </script>
+       
      </body>
    </html>
   )";
@@ -215,7 +256,8 @@ void setup(void) {
     digitalWrite(RELAY,RELAYState);
     request->send(200, "text/html", getHtml());
   });
- 
+
+  server.addHandler(&events); // Add the event source handler
   server.begin();
   Serial.println("HTTP server started");
 
