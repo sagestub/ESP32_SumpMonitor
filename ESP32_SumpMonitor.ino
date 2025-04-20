@@ -20,14 +20,51 @@ AsyncWebServer server(80);
 
 const int SWITCH = 17;
 const int RELAY = 19;
-const int LED = 1;
+const int LED = 2;
 
 String WIFI_PASSWORD = "";
 int wifiTimeout = 0;
 
-bool SWITCHState = false;
+volatile bool SWITCHState = false;
 bool RELAYState = PUMP_OFF;
 bool inputReceived = false;
+int pumpHysteretic = 0; //seconds to keep pump on after switch disengages
+
+portMUX_TYPE switchMux = portMUX_INITIALIZER_UNLOCKED;
+
+void IRAM_ATTR switchISR() {
+  portENTER_CRITICAL_ISR(&switchMux);
+  SWITCHState = !SWITCHState;
+  portEXIT_CRITICAL_ISR(&switchMux);
+}
+
+void handleSwitchTask (void *pvParameters) {
+  bool lastDebouncedState = digitalRead(SWITCH); // Initial debounced state
+
+  while (1) {
+   // Simple debouncing (adjust delay as needed)
+   vTaskDelay(pdMS_TO_TICKS(50));
+   bool currentState = digitalRead(SWITCH);
+
+   if (currentState != lastDebouncedState) {
+     lastDebouncedState = currentState;
+
+     // Now that we have a stable state change, react to it
+     portENTER_CRITICAL(&switchMux);
+     bool currentSWITCHState = SWITCHState; // Get the toggled state
+     portEXIT_CRITICAL(&switchMux);
+
+     if (currentSWITCHState) { // Assuming HIGH (true) means ON
+      digitalWrite(RELAY, PUMP_ON);
+     } 
+     else {
+      // Start a timer or use vTaskDelay for the pump-on duration
+      vTaskDelay(pdMS_TO_TICKS(5000)); // Example 5-second pump on
+      digitalWrite(RELAY, PUMP_OFF);
+     }
+   }
+  }
+ }
 
 void toggleLED(void *parameter) {
   while(1) {
@@ -41,35 +78,46 @@ void toggleLED(void *parameter) {
 String getHtml() {
   String response = R"(
     <!DOCTYPE html><html>
-      <head>
-        <title>ESP32 Web Server Demo</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <style>
-          html { font-family: sans-serif; text-align: center; }
-          body { display: inline-flex; flex-direction: column; }
-          h1 { margin-bottom: 1.2em; } 
-          h2 { margin: 0; }
-          div { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: auto auto; grid-auto-flow: column; grid-gap: 1em; }
-          .btn { background-color: #5B5; border: none; color: #fff; padding: 0.5em 1em;
-                 font-size: 2em; text-decoration: none }
-          .btn.OFF { background-color: #333; }
-        </style>
-      </head>
-            
-      <body>
-        <h1>ESP32 Web Server</h1>
+     <head>
+       <title>ESP32 Web Server Demo</title>
+       <meta name="viewport" content="width=device-width, initial-scale=1">
+       <style>
+         html { font-family: sans-serif; text-align: center; }
+         body { display: inline-flex; flex-direction: column; }
+         h1 { margin-bottom: 1.2em; }
+         h2 { margin: 0; }
+         div { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: auto auto; grid-auto-flow: column; grid-gap: 1em; }
+         .status-box {
+           padding: 0.5em 1em;
+           font-size: 2em;
+           border: 1px solid #ccc; /* Optional border */
+         }
+         .status-on {
+           background-color: #5B5;
+           color: #fff;
+         }
+         .status-off {
+           background-color: #333;
+           color: #fff;
+         }
+       </style>
+     </head>
 
-        <div>
-          <h2>Switch Status</h2>
-          <a href="/toggle/1" class="btn SWITCH_TEXT">SWITCH_TEXT</a>
-          <h2>Pump Motor</h2>
-          <a href="/toggle/2" class="btn RELAY_TEXT">RELAY_TEXT</a>
-        </div>
-      </body>
-    </html>
+     <body>
+       <h1>ESP32 Web Server</h1>
+
+       <div>
+         <h2>Switch Status</h2>
+         <span id="switchStatus" class="status-box SWITCH_CLASS">SWITCH_TEXT</span>
+         <h2>Pump Motor</h2>
+         <a href="/toggle/2" class="btn RELAY_TEXT">RELAY_TEXT</a>
+       </div>
+     </body>
+   </html>
   )";
   response.replace("SWITCH_TEXT", SWITCHState ? "ON" : "OFF");
   response.replace("RELAY_TEXT", RELAYState ? "OFF" : "ON");
+  response.replace("SWITCH_CLASS", SWITCHState ? "status-on" : "status-off");
   return response;
 }
 
@@ -130,8 +178,9 @@ void beginWifi(){
 
 void setup(void) {
   Serial.begin(115200);
-  pinMode(SWITCH, INPUT_PULLDOWN);
+  pinMode(SWITCH, INPUT_PULLUP);
   pinMode(RELAY, OUTPUT);
+  pinMode(LED,OUTPUT);
   digitalWrite(RELAY, PUMP_OFF);
 
   beginWifi();
@@ -146,12 +195,18 @@ void setup(void) {
     app_cpu);    //run on one core for demo purposes (ESP32 only)
     // in vanilla RTOS, would also require vTaskStartScheduler() in main after setting up tasks
 
+    xTaskCreatePinnedToCore(
+      handleSwitchTask,   /* Task function */
+      "HandleSwitch",     /* Name of task */
+      4096,               /* Stack size (adjust as needed) */
+      NULL,               /* Parameter passed to task */
+      2,                  /* Task priority (adjust as needed) */
+      NULL,               /* Task handle */
+      app_cpu);           /* Core to run on */
+
+    attachInterrupt(digitalPinToInterrupt(SWITCH), switchISR, CHANGE);
+
   server.on("/", [](AsyncWebServerRequest *request){
-    request->send(200, "text/html", getHtml());
-   });
- 
-  server.on("/toggle/1", [](AsyncWebServerRequest *request){
-    SWITCHState = digitalRead(SWITCH);
     request->send(200, "text/html", getHtml());
    });
 
