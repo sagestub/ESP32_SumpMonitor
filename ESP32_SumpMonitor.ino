@@ -10,14 +10,14 @@
 
 WebServer server(80);
 
-const int LED1 = 2;
-const int LED2 = 3;
+const int SWITCH = 17;
+const int RELAY = 3;
 
 String WIFI_PASSWORD = "";
 int wifiTimeout = 0;
 
-bool led1State = false;
-bool led2State = false;
+bool SWITCHState = false;
+bool RELAYState = false;
 bool inputReceived = false;
 
 void sendHtml() {
@@ -42,16 +42,16 @@ void sendHtml() {
         <h1>ESP32 Web Server</h1>
 
         <div>
-          <h2>LED 1</h2>
-          <a href="/toggle/1" class="btn LED1_TEXT">LED1_TEXT</a>
-          <h2>LED 2</h2>
-          <a href="/toggle/2" class="btn LED2_TEXT">LED2_TEXT</a>
+          <h2>Switch Status</h2>
+          <a href="/toggle/1" class="btn SWITCH_TEXT">SWITCH_TEXT</a>
+          <h2>Pump Motor</h2>
+          <a href="/toggle/2" class="btn RELAY_TEXT">RELAY_TEXT</a>
         </div>
-      </body>git st
+      </body>
     </html>
   )";
-  response.replace("LED1_TEXT", led1State ? "ON" : "OFF");
-  response.replace("LED2_TEXT", led2State ? "ON" : "OFF");
+  response.replace("SWITCH_TEXT", SWITCHState ? "ON" : "OFF");
+  response.replace("RELAY_TEXT", RELAYState ? "ON" : "OFF");
   server.send(200, "text/html", response);
 }
 
@@ -77,12 +77,9 @@ String readFullStringBlocking() {
   return inputString;
 }
 
-
-
-void setup(void) {
-  Serial.begin(115200);
-  esp_log_level_set("wifi", ESP_LOG_NONE); //set logging to none to avoid unneccessary print statements
-  while (WiFi.status() != WL_CONNECTED) {
+void beginWifi(){
+    esp_log_level_set("wifi", ESP_LOG_NONE); //set logging to none to avoid unneccessary print statements
+    while (WiFi.status() != WL_CONNECTED) {
     inputReceived = 0;
     wifiTimeout = 0;
     Serial.print("Enter password to connect to network ");
@@ -107,22 +104,30 @@ void setup(void) {
 
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
+}
+
+
+
+void setup(void) {
+  Serial.begin(115200);
+  
+  beginWifi();
 
   server.on("/", sendHtml);
 
-  server.on(UriBraces("/toggle/{}"), []() {
-    String led = server.pathArg(0);
+  server.on(UriBraces("/toggle/{}"), []() { //when buttons are toggled execute functions in brackets (changes toggle/<value>)
+    String led = server.pathArg(0);         //<value> is stored to int
     Serial.print("Toggle LED #");
     Serial.println(led);
 
     switch (led.toInt()) {
       case 1:
-        led1State = !led1State;
-        digitalWrite(LED1, led1State);
+        SWITCHState = !SWITCHState;
+        digitalWrite(SWITCH, SWITCHState);
         break;
       case 2:
-        led2State = !led2State;
-        digitalWrite(LED2, led2State);
+        RELAYState = !RELAYState;
+        digitalWrite(RELAY, RELAYState);
         break;
     }
 
@@ -132,8 +137,8 @@ void setup(void) {
   server.begin();
   Serial.println("HTTP server started");
 
-  pinMode(LED1, OUTPUT);
-  pinMode(LED2, OUTPUT);
+  pinMode(SWITCH, OUTPUT);
+  pinMode(RELAY, OUTPUT);
 }
 
 void loop(void) {
