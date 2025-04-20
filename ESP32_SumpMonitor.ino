@@ -37,6 +37,9 @@ bool pumpHysteretic = 0;
 long int intBuffer = 0;
 float avg = 0;
 unsigned int count = 0;
+int val = 0;
+int maxVal = 0;
+int eventCounter = 0;
 
 portMUX_TYPE switchMux = portMUX_INITIALIZER_UNLOCKED;
 
@@ -79,6 +82,8 @@ void handleSwitchTask (void *pvParameters) {
      PUMPState = PUMP_OFF;
      pumpHysteretic = 0;
      events.send("OFF", "pumpStatus");
+     eventCounter += 1;
+     events.send(String(eventCounter),"eventCount");
    }
   }
  }
@@ -94,24 +99,22 @@ void toggleLED(void *parameter) {
 
 void readADC(void *parameter) {
    while (1) {
-    intBuffer+=analogRead(adcPin);
-    count++; 
-    if(count>=50){
-      avg = (float(intBuffer/50));
-      intBuffer=0;                    //reset counters and buffer
-      count = 0;
+
+    val=analogRead(ADC);
+    if(val>maxVal) {
+    maxVal = val;
     }
-    if(count%25<3) {
-      Serial.println(avg);
+    count++; 
+    if(count>50){
+      avg = float(maxVal)*0.018; //0.707*3.3/4096*32, 0.018 or 0.03?
+      intBuffer=0;
+      count = 0;
+      maxVal = 0;
       char adcValueStr[20];
-      sprintf(adcValueStr, "%.2f", voltage); // Format the float to a string
+      sprintf(adcValueStr, "%.2f", avg); // Format the float to a string
       events.send(adcValueStr, "adcReading");
     }
-    vTaskDelay(5/portTICK_PERIOD_MS);
-
-    int adcRawValue = analogRead(ADC_PIN); // Replace ADC_PIN with your actual pin
-    float voltage = adcRawValue * (3.3 / 4095.0) * 1000.0; // Example conversion to mV
-    
+    vTaskDelay(5/portTICK_PERIOD_MS);    
   }
 }
 
@@ -157,15 +160,21 @@ String getHtml() {
          <span id="pumpStatus" class="status-box RELAY_CLASS">RELAY_TEXT</span>
        </div>
 
-       <div style="height:100px;display:inline-block;place-items:center">
+       <div style="display:inline;place-items:center">
         <h2 style="display:block">Manual Override</h2>
         <a href="/toggle/2" class="btn OVERRIDE_TEXT" style="display:block;width:100px;height:50px;margin: 0 auto">OVERRIDE_TEXT</a>
       </div>
 
-      <div>
-        <h2>Motor Current Draw</h2>
+      <div style="display:inline">
+        <h3>Motor Current Draw</h3>
         <span id="adcValue">0</span>
         <span id="adcUnit"> (mV)</span> 
+      </div>
+
+      <div style="display:inline">
+        <h3>Motor Event Count</h3>
+        <span id="eventCount">0</span>
+        <span id="eventUnit"> (events)</span> 
       </div>
 
        <script>
@@ -175,6 +184,11 @@ String getHtml() {
            source.addEventListener('adcReading', function(e) {
             var adcValueElement = document.getElementById('adcValue');
             adcValueElement.innerText = e.data; // Update the span with the received ADC value
+          }, false);
+
+          source.addEventListener('eventCount', function(e) {
+            var eventCountElement = document.getElementById('eventCount');
+            adcValueElement.innerText = e.data; // Update the span with the received value
           }, false);
 
            source.addEventListener('switchStatus', function(e) {
@@ -211,6 +225,7 @@ String getHtml() {
   response.replace("RELAY_CLASS", PUMPState ? "status-off" : "status-on");
 
   response.replace("OVERRIDE_TEXT",OVERRIDEState ? "OFF" : "ON");
+  // response.replace("EVENT_COUNT",String(eventCounter));
   return response;
 }
 
@@ -318,6 +333,10 @@ void setup(void) {
     OVERRIDEState = !OVERRIDEState;
     digitalWrite(RELAY,OVERRIDEState);
     PUMPState = OVERRIDEState;
+    if (PUMPState==PUMP_OFF) {
+      eventCounter +=1;
+      events.send(String(eventCounter),"eventCount");
+    }
     request->send(200, "text/html", getHtml());
   });
 
