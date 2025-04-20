@@ -106,15 +106,13 @@ void readADC(void *parameter) {
     }
     count++; 
     if(count>50){
-      avg = float(maxVal)*0.018; //0.707*3.3/4096*32, 0.018 or 0.03?
+      avg = float(maxVal)*0.03; //0.707*3.3/4096*32, 0.018 or 0.03?
       intBuffer=0;
       count = 0;
       maxVal = 0;
       char adcValueStr[20];
       sprintf(adcValueStr, "%.2f", avg); // Format the float to a string
       events.send(adcValueStr, "adcValue");
-      Serial.print(val);
-      Serial.println(adcValueStr);
     }
     vTaskDelay(5/portTICK_PERIOD_MS);    
   }
@@ -170,13 +168,13 @@ String getHtml() {
       <div style="display:inline">
         <h3>Motor Current Draw</h3>
         <span id="adcValue">0</span>
-        <span id="adcUnit"> (mV)</span> 
+        <span id="adcUnit"> amps</span> 
       </div>
 
       <div style="display:inline">
         <h3>Motor Event Count</h3>
         <span id="eventCount">EVENT_COUNT</span>
-        <span id="eventUnit"> (events)</span> 
+        <span id="eventUnit"> events</span> 
       </div>
 
        <script>
